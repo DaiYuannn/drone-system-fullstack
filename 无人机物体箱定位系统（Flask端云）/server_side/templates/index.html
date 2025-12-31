@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>无人机物体箱定位系统</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .card h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 10px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .stat-number {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 0.9em;
+        }
+        
+        .table-container {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            overflow-x: auto;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        
+        .status-online {
+            color: #28a745;
+            font-weight: bold;
+        }
+        
+        .status-offline {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        
+        .map-container {
+            height: 400px;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border-radius: 25px;
+            color: white;
+            font-weight: bold;
+            z-index: 1000;
+        }
+        
+        .connected {
+            background-color: #28a745;
+        }
+        
+        .disconnected {
+            background-color: #dc3545;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        
+        .error {
+            color: #dc3545;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 5px;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        
+        .success {
+            color: #155724;
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 5px;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>无人机物体箱定位系统</h1>
+        <p>实时监控与数据分析平台</p>
+    </div>
+    
+    <div class="connection-status" id="connectionStatus">
+        连接中...
+    </div>
+    
+    <div class="container">
+        <!-- 统计信息 -->
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <div class="stat-number" id="totalDetections">-</div>
+                <div class="stat-label">总检测次数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="todayDetections">-</div>
+                <div class="stat-label">今日检测</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="onlineDrones">-</div>
+                <div class="stat-label">在线无人机</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="uniqueBarcodes">-</div>
+                <div class="stat-label">唯一条形码</div>
+            </div>
+        </div>
+        
+        <!-- 主要仪表板 -->
+        <div class="dashboard">
+            <!-- 地图显示 -->
+            <div class="card">
+                <h3>实时位置地图</h3>
+                <div id="map" class="map-container"></div>
+            </div>
+            
+            <!-- 无人机状态 -->
+            <div class="card">
+                <h3>无人机状态</h3>
+                <div id="droneStatus">
+                    <div class="loading">加载中...</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 检测记录表格 -->
+        <div class="table-container">
+            <h3>最新检测记录</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>时间戳</th>
+                        <th>无人机ID</th>
+                        <th>条形码ID</th>
+                        <th>纬度</th>
+                        <th>经度</th>
+                        <th>高度(m)</th>
+                        <th>置信度</th>
+                    </tr>
+                </thead>
+                <tbody id="detectionTableBody">
+                    <tr>
+                        <td colspan="7" class="loading">加载中...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let socket;
+    let map;           // Plotly 图
+    let lMap;          // Leaflet 图
+    let lMarkers;      // Leaflet 标记图层
+        let mapDivEl;
+        let isConnected = false;
+        const MAPBOX_TOKEN = "{{ mapbox_token or '' }}";
+    const useLeaflet = !MAPBOX_TOKEN; // 无 Token 时默认使用 Leaflet 底图
+        
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 如果提供了 Mapbox Token，则配置 Plotly 使用该 Token
+            if (!useLeaflet && MAPBOX_TOKEN) {
+                try { Plotly.setPlotConfig({ mapboxAccessToken: MAPBOX_TOKEN }); } catch (e) { console.warn('Mapbox Token 配置失败:', e); }
+            }
+            initializeWebSocket();
+            initializeMap();
+            loadInitialData();
+            startPeriodicUpdates();
+        });
+        
+        // WebSocket连接
+        function initializeWebSocket() {
+            socket = io();
+            
+            socket.on('connect', function() {
+                console.log('WebSocket连接成功');
+                updateConnectionStatus(true);
+                isConnected = true;
+            });
+            
+            socket.on('disconnect', function() {
+                console.log('WebSocket连接断开');
+                updateConnectionStatus(false);
+                isConnected = false;
+            });
+            
+            socket.on('new_detection', function(data) {
+                console.log('收到新检测数据:', data);
+                addDetectionToTable(data);
+                updateMapWithDetection(data);
+                updateStatistics();
+            });
+            
+            socket.on('message', function(data) {
+                console.log('收到消息:', data);
+            });
+        }
+        
+        // 更新连接状态
+        function updateConnectionStatus(connected) {
+            const statusElement = document.getElementById('connectionStatus');
+            if (connected) {
+                statusElement.textContent = '已连接';
+                statusElement.className = 'connection-status connected';
+            } else {
+                statusElement.textContent = '连接断开';
+                statusElement.className = 'connection-status disconnected';
+            }
+        }
+        
+        // 初始化地图
+        function initializeMap() {
+            mapDivEl = document.getElementById('map');
+
+            if (useLeaflet) {
+                // Leaflet 回退：使用 OSM 瓦片，不需要 Token
+                lMap = L.map(mapDivEl).setView([39.9087, 116.3975], 10);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '&copy; OpenStreetMap contributors'
+                }).addTo(lMap);
+                lMarkers = L.layerGroup().addTo(lMap);
+            } else {
+                // Plotly + Mapbox
+                const baseStyle = 'streets';
+                map = Plotly.newPlot(mapDivEl, [{
+                    type: 'scattermapbox',
+                    lat: [],
+                    lon: [],
+                    mode: 'markers',
+                    marker: { 
+                        size: 12, 
+                        color: '#667eea',
+                        opacity: 0.8
+                    },
+                    text: [],
+                    hovertemplate: '<b>%{text}</b><br>' +
+                                  '纬度: %{lat:.6f}<br>' +
+                                  '经度: %{lon:.6f}<br>' +
+                                  '<extra></extra>'
+                }], {
+                    mapbox: {
+                        style: baseStyle,
+                        center: { lat: 39.9087, lon: 116.3975 },
+                        zoom: 10
+                    },
+                    margin: { r: 0, t: 0, b: 0, l: 0 },
+                    showlegend: false,
+                    uirevision: true
+                });
+            }
+        }
+        
+        // 加载初始数据
+        async function loadInitialData() {
+            try {
+                await Promise.all([
+                    loadStatistics(),
+                    loadRecentPositions(),
+                    loadDroneStatus()
+                ]);
+            } catch (error) {
+                console.error('加载初始数据失败:', error);
+                showError('加载数据失败: ' + error.message);
+            }
+        }
+        
+        // 加载统计信息
+        async function loadStatistics() {
+            try {
+                const response = await fetch('/api/statistics');
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    updateStatisticsDisplay(result.data);
+                } else {
+                    throw new Error(result.message);
+                }
+            } catch (error) {
+                console.error('加载统计信息失败:', error);
+            }
+        }
+        
+        // 更新统计信息显示
+        function updateStatisticsDisplay(stats) {
+            document.getElementById('totalDetections').textContent = stats.total_detections || 0;
+            document.getElementById('todayDetections').textContent = stats.today_detections || 0;
+            document.getElementById('onlineDrones').textContent = stats.online_drones || 0;
+            document.getElementById('uniqueBarcodes').textContent = stats.unique_barcodes || 0;
+        }
+        
+        // 加载最近位置数据
+        async function loadRecentPositions() {
+            try {
+                const response = await fetch('/api/positions?limit=50');
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    updateDetectionTable(result.data);
+                    updateMapWithPositions(result.data);
+                } else {
+                    throw new Error(result.message);
+                }
+            } catch (error) {
+                console.error('加载位置数据失败:', error);
+            }
+        }
+        
+        // 加载无人机状态
+        async function loadDroneStatus() {
+            try {
+                const response = await fetch('/api/drones');
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    updateDroneStatusDisplay(result.data);
+                } else {
+                    throw new Error(result.message);
+                }
+            } catch (error) {
+                console.error('加载无人机状态失败:', error);
+            }
+        }
+        
+        // 更新检测记录表格
+        function updateDetectionTable(positions) {
+            const tbody = document.getElementById('detectionTableBody');
+            tbody.innerHTML = '';
+            
+            if (positions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="loading">暂无数据</td></tr>';
+                return;
+            }
+            
+            positions.forEach(position => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${formatDateTime(position.timestamp)}</td>
+                    <td>${position.drone_id}</td>
+                    <td>${position.barcode_data}</td>
+                    <td>${position.latitude ? position.latitude.toFixed(6) : '-'}</td>
+                    <td>${position.longitude ? position.longitude.toFixed(6) : '-'}</td>
+                    <td>${position.altitude ? position.altitude.toFixed(2) : '-'}</td>
+                    <td>${(position.confidence * 100).toFixed(1)}%</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        // 添加新检测到表格
+        function addDetectionToTable(data) {
+            const tbody = document.getElementById('detectionTableBody');
+            const row = document.createElement('tr');
+            row.style.backgroundColor = '#e8f5e8';
+            
+            row.innerHTML = `
+                <td>${formatDateTime(data.timestamp)}</td>
+                <td>${data.drone_id}</td>
+                <td>${data.barcode_data}</td>
+                <td>${data.gps ? data.gps.latitude.toFixed(6) : '-'}</td>
+                <td>${data.gps ? data.gps.longitude.toFixed(6) : '-'}</td>
+                <td>${data.gps ? data.gps.altitude.toFixed(2) : '-'}</td>
+                <td>${(data.confidence * 100).toFixed(1)}%</td>
+            `;
+            
+            tbody.insertBefore(row, tbody.firstChild);
+            
+            // 限制表格行数
+            while (tbody.children.length > 50) {
+                tbody.removeChild(tbody.lastChild);
+            }
+            
+            // 3秒后移除高亮
+            setTimeout(() => {
+                row.style.backgroundColor = '';
+            }, 3000);
+        }
+        
+        // 更新无人机状态显示
+        function updateDroneStatusDisplay(drones) {
+            const container = document.getElementById('droneStatus');
+            
+            if (drones.length === 0) {
+                container.innerHTML = '<div class="loading">暂无无人机数据</div>';
+                return;
+            }
+            
+            let html = '';
+            drones.forEach(drone => {
+                const statusClass = drone.status === 'online' ? 'status-online' : 'status-offline';
+                const lastHeartbeat = drone.last_heartbeat ? formatDateTime(drone.last_heartbeat) : '未知';
+                
+                html += `
+                    <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                        <strong>${drone.drone_id}</strong>
+                        <span class="${statusClass}">${drone.status === 'online' ? '在线' : '离线'}</span>
+                        <br>
+                        <small>最后心跳: ${lastHeartbeat}</small>
+                        ${drone.gps_latitude ? `<br><small>位置: ${drone.gps_latitude.toFixed(6)}, ${drone.gps_longitude.toFixed(6)}</small>` : ''}
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+        }
+        
+        // 更新地图位置
+        function updateMapWithPositions(positions) {
+            const validPositions = positions.filter(p => p.latitude && p.longitude);
+            
+            if (validPositions.length === 0) {
+                return;
+            }
+            
+            if (useLeaflet) {
+                lMarkers.clearLayers();
+                const bounds = [];
+                validPositions.forEach(p => {
+                    const m = L.marker([p.latitude, p.longitude]).bindPopup(
+                        `ID: ${p.barcode_data}<br>时间: ${formatDateTime(p.timestamp)}`
+                    );
+                    m.addTo(lMarkers);
+                    bounds.push([p.latitude, p.longitude]);
+                });
+                if (bounds.length > 0) {
+                    try { lMap.fitBounds(bounds, { padding: [20, 20] }); } catch (e) {}
+                }
+            } else {
+                const lats = validPositions.map(p => p.latitude);
+                const lons = validPositions.map(p => p.longitude);
+                const texts = validPositions.map(p => `ID: ${p.barcode_data}<br>时间: ${formatDateTime(p.timestamp)}`);
+                const update = { lat: [lats], lon: [lons], text: [texts] };
+                if (mapDivEl) { Plotly.update(mapDivEl, update); }
+            }
+        }
+        
+        // 更新地图单个检测
+        function updateMapWithDetection(data) {
+            if (!data.gps || !data.gps.latitude || !data.gps.longitude) {
+                return;
+            }
+            
+            if (useLeaflet) {
+                const m = L.marker([data.gps.latitude, data.gps.longitude]).bindPopup(
+                    `ID: ${data.barcode_data}<br>时间: ${formatDateTime(data.timestamp)}`
+                );
+                m.addTo(lMarkers);
+                try { lMap.panTo([data.gps.latitude, data.gps.longitude]); } catch (e) {}
+            } else {
+                const update = {
+                    lat: [[data.gps.latitude]],
+                    lon: [[data.gps.longitude]],
+                    text: [[`ID: ${data.barcode_data}<br>时间: ${formatDateTime(data.timestamp)}`]]
+                };
+                if (mapDivEl) { Plotly.update(mapDivEl, update); }
+            }
+        }
+        
+        // 定期更新数据
+        function startPeriodicUpdates() {
+            setInterval(async () => {
+                if (isConnected) {
+                    try {
+                        await loadStatistics();
+                        await loadDroneStatus();
+                    } catch (error) {
+                        console.error('定期更新失败:', error);
+                    }
+                }
+            }, 30000); // 每30秒更新一次
+        }
+        
+        // 工具函数
+        function formatDateTime(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleString('zh-CN');
+        }
+        
+        function showError(message) {
+            const container = document.querySelector('.container');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error';
+            errorDiv.textContent = message;
+            container.insertBefore(errorDiv, container.firstChild);
+            
+            setTimeout(() => {
+                errorDiv.remove();
+            }, 5000);
+        }
+        
+        function showSuccess(message) {
+            const container = document.querySelector('.container');
+            const successDiv = document.createElement('div');
+            successDiv.className = 'success';
+            successDiv.textContent = message;
+            container.insertBefore(successDiv, container.firstChild);
+            
+            setTimeout(() => {
+                successDiv.remove();
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

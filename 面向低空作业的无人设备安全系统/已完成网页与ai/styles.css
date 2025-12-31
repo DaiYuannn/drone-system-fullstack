@@ -1,0 +1,156 @@
+/* styles.css */
+/* 基础布局样式 */
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    display: flex;
+    height: 100vh;
+}
+
+#map {
+    flex: 1;
+    height: 100%;
+}
+
+/* 侧边栏样式 */
+#sidebar {
+    width: 350px;
+    background: #f8f9fa;
+    padding: 20px;
+    box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+    overflow-y: auto;
+}
+
+h2, h3 {
+    margin-bottom: 10px;
+}
+
+/* 表单元素样式 */
+label {
+    display: inline-block;
+    margin-top: 10px;
+    font-weight: bold;
+}
+
+input[type="text"], 
+input[type="datetime-local"] {
+    width: calc(100% - 100px);
+    padding: 5px;
+    margin: 5px 10px 10px 0;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+button {
+    padding: 10px 15px;
+    margin: 5px 0;
+    background: #007bff;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #0056b3;
+}
+
+/* 任务列表样式 */
+.task-list {
+    border: 1px solid #ddd;
+    padding: 10px;
+    max-height: 180px;
+    overflow-y: auto;
+    border-radius: 5px;
+    background: #fff;
+}
+
+.task-list div {
+    margin-bottom: 10px;
+    padding: 5px;
+    cursor: pointer;
+    background: #f9f9f9;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+.task-list div:hover {
+    background: #e9ecef;
+}
+
+/* 聊天界面样式 */
+#chat-button {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: 10px 20px;
+    background: #007bff;
+    color: white;
+    cursor: pointer;
+    border-radius: 5px;
+    z-index: 1000;
+}
+
+#chat-dialog {
+    position: fixed;
+    bottom: 80px;
+    right: 20px;
+    width: 300px;
+    height: 400px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+    z-index: 1000;
+}
+
+#chat-messages {
+    flex: 1;
+    padding: 10px;
+    overflow-y: auto;
+}
+
+.chat-input-container {
+    display: flex;
+    padding: 10px;
+    border-top: 1px solid #ddd;
+}
+
+#chat-input {
+    flex: 1;
+    padding: 8px;
+    margin-right: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+.chat-message {
+    margin: 5px 0;
+    padding: 8px;
+    border-radius: 4px;
+    background: #f1f1f1;
+}
+
+.bot-message {
+    background: #e3f2fd;
+}
+
+/* 添加路径动画效果 */
+.leaflet-polyline {
+    stroke-dasharray: 10, 5;
+    animation: pathFlow 1s linear infinite;
+}
+
+@keyframes pathFlow {
+    from { stroke-dashoffset: 15; }
+    to { stroke-dashoffset: 0; }
+}
+
+/* 调整表单输入样式 */
+input[type="number"] {
+    width: 100px;
+    padding: 5px;
+    margin: 5px 0;
+}

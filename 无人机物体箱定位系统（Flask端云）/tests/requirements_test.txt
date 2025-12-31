@@ -1,0 +1,30 @@
+# 飞控上传测试程序依赖包
+# Flight Controller Upload Test Program Requirements
+
+# 核心依赖
+opencv-python>=4.8.0        # 计算机视觉和图像处理
+pyzbar>=0.1.9               # 条形码和二维码解码
+qrcode[pil]>=7.4.0          # 二维码生成
+Pillow>=10.0.0              # 图像处理库
+numpy>=1.24.0               # 数值计算
+requests>=2.31.0            # HTTP请求
+pycryptodome>=3.20.0        # AES-GCM 加解密（与服务端/客户端一致）
+
+# 可选依赖（用于高级功能）
+websockets>=11.0.0          # WebSocket通信（如果需要实时数据推送）
+python-socketio[client]>=5.11.0   # Socket.IO 客户端
+matplotlib>=3.7.0           # 数据可视化（可选）
+pandas>=2.0.0               # 数据分析（可选）
+
+# 开发和测试依赖
+pytest>=7.4.0              # 单元测试框架
+pytest-cov>=4.1.0          # 测试覆盖率
+flake8>=6.0.0               # 代码风格检查
+black>=23.7.0               # 代码格式化
+
+# 日志和监控
+colorlog>=6.7.0             # 彩色日志输出
+psutil>=5.9.0               # 系统资源监控
+
+# 数据库/标准库说明：以下为 Python 内置模块，无需安装
+# - sqlite3 / pathlib / json / datetime / threading / queue / time / random / math / logging / os / sys

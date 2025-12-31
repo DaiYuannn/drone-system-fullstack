@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UAV 前端</title>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    .panel { position:absolute; top:10px; left:10px; background:#fff; padding:8px; border-radius:6px; box-shadow:0 2px 8px rgba(0,0,0,.15); font-family:system-ui; }
+    .row { margin:6px 0; }
+    input, button { font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="panel">
+    <div class="row">
+      <label>WS: </label>
+      <input id="wsUrl" value="ws://localhost:8000/ws" size="28" />
+      <button id="btnConnect">连接</button>
+    </div>
+    <div class="row">
+      <button id="btnSend">发送 path.update</button>
+      <span id="status"></span>
+    </div>
+  </div>
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+  <script>
+    // 设置你的 Mapbox Token
+    mapboxgl.accessToken = 'YOUR_MAPBOX_TOKEN';
+    const map = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/streets-v11',
+      center: [116.39, 39.9],
+      zoom: 12
+    });
+  </script>
+  <script src="./app.js"></script>
+</body>
+</html>

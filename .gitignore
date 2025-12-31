@@ -1,0 +1,62 @@
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# dotenv / secrets
+.env
+.env.*
+*.env
+
+# --- Node / Vite / React ---
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/
+.yarn-cache/
+
+# build outputs
+out/
+dist/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Misc ---
+*.log
+*.tmp
+*.bak

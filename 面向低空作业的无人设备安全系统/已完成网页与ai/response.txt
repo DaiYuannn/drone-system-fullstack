@@ -1,0 +1,2 @@
+fastapi-poe==0.0.58
+pydantic==2.10.3

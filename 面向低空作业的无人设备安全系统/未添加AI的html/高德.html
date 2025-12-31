@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>无人机任务管理系统</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://webapi.amap.com/maps?v=2.0&key=a730baf55f6c936be8fbf1d839fabc8a"></script>
+</head>
+<body>
+    <!-- 地图容器 -->
+    <div id="map"></div>
+    
+    <!-- 侧边栏 -->
+    <div id="sidebar">
+        <h1>无人机任务管理</h1>
+        <button id="create-task-btn">创建任务</button>
+
+        <!-- 创建任务表单 -->
+        <div id="task-form" style="display: none;">
+            <input type="text" id="task-name" placeholder="任务名称">
+            <input type="datetime-local" id="task-time">
+            <button id="select-takeoff">选择起飞地点</button>
+            <button id="select-landing">选择降落地点</button>
+            <button id="start-draw-area">开始绘制</button>
+            <button id="end-draw-area" disabled>结束绘制</button>
+            <button id="save-task" disabled>保存任务</button>
+        </div>
+
+        <!-- 任务列表 -->
+        <div id="task-list">
+            <h2>任务列表</h2>
+            <div id="task-list-container"></div>
+        </div>
+
+        <!-- 实时显示 -->
+        <div class="task-info">
+            <h2>任务详情</h2>
+            <p>当前任务：<span id="current-task">无</span></p>
+            <p>起飞地点：<span id="takeoff-point">无</span> <span style="display: inline-block; width: 12px; height: 12px; background-color: red; border-radius: 50%;"></span></p>
+            <p>降落地点：<span id="landing-point">无</span> <span style="display: inline-block; width: 12px; height: 12px; background-color: blue; border-radius: 50%;"></span></p>
+            <p>扫描区域面积：<span id="scan-area">无</span> 公顷</p>
+            <p>预计用时：<span id="estimated-time">无</span> 分钟</p>
+        </div>
+    </div>
+
+    <script>
+        // 初始化地图
+        const map = new AMap.Map('map', {
+            zoom: 10,
+            center: [116.397428, 39.90923] // 默认中心点，北京
+        });
+
+        let tasks = [];
+        let takeoffMarker = null;
+        let landingMarker = null;
+        let scanPolygon = null;
+        let isSelectingTakeoff = false;
+        let isSelectingLanding = false;
+        let isDrawing = false;
+        let polygonPath = [];
+        const saveTaskBtn = document.getElementById('save-task');
+        const startDrawBtn = document.getElementById('start-draw-area');
+        const endDrawBtn = document.getElementById('end-draw-area');
+
+        // 显示任务表单
+        const createTaskBtn = document.getElementById('create-task-btn');
+        const taskForm = document.getElementById('task-form');
+        createTaskBtn.addEventListener('click', () => {
+            taskForm.style.display = taskForm.style.display === 'none' ? 'block' : 'none';
+
+            // 清除地图上的所有标记
+            map.clearMap();
+            map.clearEvents();
+        });
+
+        // 检查是否可以启用保存任务按钮
+        function checkCanSaveTask() {
+            const taskName = document.getElementById('task-name').value.trim();
+            const taskTime = document.getElementById('task-time').value.trim();
+            if (taskName && taskTime && takeoffMarker && landingMarker && scanPolygon) {
+                saveTaskBtn.disabled = false;
+            } else {
+                saveTaskBtn.disabled = true;
+            }
+        }
+
+        // 选择起飞地点
+        document.getElementById('select-takeoff').addEventListener('click', () => {
+            isSelectingTakeoff = true;
+            isSelectingLanding = false;
+            map.off('click'); // 确保解绑所有之前的点击事件
+            map.on('click', (e) => {
+                if (!isSelectingTakeoff) return;
+                if (takeoffMarker) map.remove(takeoffMarker);
+                takeoffMarker = new AMap.Marker({
+                    position: e.lnglat,
+                    map: map,
+                    content: '<div class="marker-red"></div>',
+                    offset: new AMap.Pixel(-6, -6),
+                    title: '起飞点'
+                });
+                document.getElementById('takeoff-point').textContent = `${e.lnglat.lng}, ${e.lnglat.lat}`;
+                isSelectingTakeoff = false;
+                map.off('click'); // 解绑点击事件
+                checkCanSaveTask(); // 检查是否可以保存任务
+            });
+        });
+
+        // 选择降落地点
+        document.getElementById('select-landing').addEventListener('click', () => {
+            isSelectingLanding = true;
+            isSelectingTakeoff = false;
+            map.off('click'); // 确保解绑所有之前的点击事件
+            map.on('click', (e) => {
+                if (!isSelectingLanding) return;
+                if (landingMarker) map.remove(landingMarker);
+                landingMarker = new AMap.Marker({
+                    position: e.lnglat,
+                    map: map,
+                    content: '<div class="marker-blue"></div>',
+                    offset: new AMap.Pixel(-6, -6),
+                    title: '降落点'
+                });
+                document.getElementById('landing-point').textContent = `${e.lnglat.lng}, ${e.lnglat.lat}`;
+                isSelectingLanding = false;
+                map.off('click'); // 解绑点击事件
+                checkCanSaveTask(); // 检查是否可以保存任务
+            });
+        });
+
+        // 开始绘制扫描区域
+        startDrawBtn.addEventListener('click', () => {
+            isDrawing = true;
+            polygonPath = []; // 重置路径
+            if (scanPolygon) map.remove(scanPolygon); // 清除之前的多边形
+            startDrawBtn.disabled = true;
+            endDrawBtn.disabled = false;
+
+            // 监听地图点击事件进行绘制
+            map.on('click', drawPolygonPath);
+
+            // 右键撤回最后一个点
+            map.on('rightclick', removeLastPoint);
+        });
+
+        // 结束绘制扫描区域
+        endDrawBtn.addEventListener('click', () => {
+            isDrawing = false;
+            startDrawBtn.disabled = false;
+            endDrawBtn.disabled = true;
+
+            map.off('click', drawPolygonPath); // 解绑点击事件
+            map.off('rightclick', removeLastPoint); // 解绑右键事件
+
+            if (polygonPath.length > 2) {
+                const area = AMap.GeometryUtil.ringArea(polygonPath) / 10000; // 计算面积
+                document.getElementById('scan-area').textContent = area.toFixed(2);
+                checkCanSaveTask(); // 检查是否可以保存任务
+            } else {
+                alert('多边形至少需要三个点，请重新绘制！');
+                if (scanPolygon) map.remove(scanPolygon);
+                scanPolygon = null;
+            }
+        });
+
+        // 绘制多边形路径
+        function drawPolygonPath(event) {
+            polygonPath.push(event.lnglat);
+            if (scanPolygon) map.remove(scanPolygon); // 移除旧的多边形
+
+            scanPolygon = new AMap.Polygon({
+                path: polygonPath,
+                fillColor: '#f5deb3',
+                strokeColor: '#ffa500',
+                strokeWeight: 2,
+                fillOpacity: 0.4,
+                map: map
+            });
+        }
+
+        // 撤回最后一个点
+        function removeLastPoint() {
+            if (polygonPath.length > 0) {
+                polygonPath.pop(); // 移除最后一个点
+                if (scanPolygon) map.remove(scanPolygon);
+                if (polygonPath.length > 0) {
+                    scanPolygon = new AMap.Polygon({
+                        path: polygonPath,
+                        fillColor: '#f5deb3',
+                        strokeColor: '#ffa500',
+                        strokeWeight: 2,
+                        fillOpacity: 0.4,
+                        map: map
+                    });
+                } else {
+                    scanPolygon = null;
+                }
+            }
+        }
+
+        // 保存任务
+        saveTaskBtn.addEventListener('click', () => {
+            const taskName = document.getElementById('task-name').value.trim();
+            const taskTime = document.getElementById('task-time').value.trim();
+            if (!taskName || !taskTime || !takeoffMarker || !landingMarker || !scanPolygon) {
+                alert('请完整填写任务信息！');
+                return;
+            }
+
+            const task = {
+                name: taskName,
+                time: taskTime,
+                takeoff: takeoffMarker.getPosition(),
+                landing: landingMarker.getPosition(),
+                area: document.getElementById('scan-area').textContent,
+                polygonPath: scanPolygon.getPath()
+            };
+
+            tasks.push(task);
+            updateTaskList();
+            resetForm();
+
+            // 隐藏任务表单
+            taskForm.style.display = 'none';
+
+            // 清除地图上的所有标记
+            map.clearMap();
+            map.clearEvents();
+        });
+
+        // 更新任务列表
+        function updateTaskList() {
+            const container = document.getElementById('task-list-container');
+            container.innerHTML = '';
+            tasks.forEach((task, index) => {
+                const div = document.createElement('div');
+                div.textContent = `${task.name} (${task.time})`;
+                div.className = 'task-list-item';
+
+                // 添加点击事件，显示任务详情并绘制地图图示
+                div.addEventListener('click', () => {
+                    loadTaskDetails(index);
+                });
+
+                container.appendChild(div);
+            });
+        }
+
+        // 加载任务详情并在地图上绘制相关图示
+        function loadTaskDetails(index) {
+            const task = tasks[index];
+
+            // 更新任务详情到侧边栏
+            document.getElementById('current-task').textContent = task.name;
+            document.getElementById('takeoff-point').textContent = `${task.takeoff.lng}, ${task.takeoff.lat}`;
+            document.getElementById('landing-point').textContent = `${task.landing.lng}, ${task.landing.lat}`;
+            document.getElementById('scan-area').textContent = task.area;
+
+            // 隐藏任务表单
+            taskForm.style.display = 'none';
+
+            // 清除地图上的所有标记
+            map.clearMap();
+            map.clearEvents();
+
+            // 绘制起飞点
+            new AMap.Marker({
+                position: task.takeoff,
+                map: map,
+                content: '<div class="marker-red"></div>',
+                offset: new AMap.Pixel(-6, -6)
+            });
+
+            // 绘制降落点
+            new AMap.Marker({
+                position: task.landing,
+                map: map,
+                content: '<div class="marker-blue"></div>',
+                offset: new AMap.Pixel(-6, -6)
+            });
+
+            // 绘制扫描区域
+            new AMap.Polygon({
+                path: task.polygonPath,
+                fillColor: '#f5deb3',
+                strokeColor: '#ffa500',
+                strokeWeight: 2,
+                fillOpacity: 0.4,
+                map: map
+            });
+        }
+
+        // 重置表单和地图
+        function resetForm() {
+            document.getElementById('task-name').value = '';
+            document.getElementById('task-time').value = '';
+            document.getElementById('takeoff-point').textContent = '无';
+            document.getElementById('landing-point').textContent = '无';
+            document.getElementById('scan-area').textContent = '无';
+            saveTaskBtn.disabled = true;
+            map.clearMap();
+        }
+    </script>
+</body>
+</html>

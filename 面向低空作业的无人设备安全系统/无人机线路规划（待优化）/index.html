@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>无人机任务管理系统</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<!-- AI 对话按钮和对话框 -->
+<div id="chat-button" onclick="toggleChat()">AI 助手</div>
+<div id="chat-dialog" style="display: none;">
+    <div id="chat-messages"></div>
+    <div class="chat-input-container">
+        <input type="text" id="chat-input" placeholder="输入消息..." />
+        <button onclick="sendMessage()">发送</button>
+    </div>
+</div>
+
+<div id="sidebar">
+    <h2>任务管理</h2>
+    <button onclick="createNewTask()">创建任务</button>
+    <div id="task-form" style="display: none;">
+        <label for="task-name">任务名称：</label>
+        <input type="text" id="task-name" placeholder="输入任务名称" />
+        <label for="start-time">开始时间：</label>
+        <input type="datetime-local" id="start-time" />
+
+        <label for="takeoff-coord">起飞地点：</label>
+        <input type="text" id="takeoff-coord" placeholder="格式：30.5, 114.3" oninput="updateTakeoffMarker()" />
+        <button onclick="selectTakeoffLocation()">选择</button>
+
+        <label for="landing-coord">降落地点：</label>
+        <input type="text" id="landing-coord" placeholder="格式：30.6, 114.3" oninput="updateLandingMarker()" />
+        <button onclick="selectLandingLocation()">选择</button>
+
+        <button onclick="startDrawing()">绘制区域</button>
+        
+        <label for="turn-radius">拐弯半径（米）：</label>
+        <input type="number" id="turn-radius" value="30" min="10" step="5" />
+        
+        <label for="scan-spacing">扫描间距（米）：</label>
+        <input type="number" id="scan-spacing" value="50" min="10" step="5" />
+
+        <button onclick="createTask()">保存任务</button>
+    </div>
+
+    <h3>任务列表</h3>
+    <div class="task-list" id="task-list"></div>
+
+    <h2>实时显示</h2>
+    <div>当前任务：<span id="current-task">无</span></div>
+    <div>起飞地点：<span id="current-takeoff">N/A</span></div>
+    <div>降落地点：<span id="current-landing">N/A</span></div>
+    <div>扫描区域面积：<span id="current-area">N/A</span> 公顷</div>
+    <div>预计用时：<span id="current-duration">N/A</span> 分钟</div>
+    <div>飞行路径长度：<span id="path-length">N/A</span> 公里</div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // 控制对话框显示/隐藏
+    let isChatOpen = false;
+    function toggleChat() {
+        const dialog = document.getElementById('chat-dialog');
+        isChatOpen = !isChatOpen;
+        dialog.style.display = isChatOpen ? 'flex' : 'none';
+    }
+
+    // 发送消息到后端
+    async function sendMessage() {
+        const input = document.getElementById('chat-input');
+        const message = input.value.trim();
+        if (!message) return;
+        
+        const messagesDiv = document.getElementById('chat-messages');
+        messagesDiv.innerHTML += `<div class="chat-message">You: ${message}</div>`;
+        input.value = '';
+        
+        try {
+            const response = await fetch('http://localhost:8000/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message })
+            });
+            const data = await response.json();
+            messagesDiv.innerHTML += `<div class="chat-message bot-message">Bot: ${data.reply}</div>`;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        } catch (error) {
+            console.error('Error:', error);
+            messagesDiv.innerHTML += `<div class="chat-message bot-message">Error: 无法连接到AI服务</div>`;
+        }
+    }
+
+    // 回车键发送消息
+    document.getElementById('chat-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendMessage();
+    });
+
+    // 初始化地图
+    const map = L.map('map').setView([30.5, 114.3], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+    }).addTo(map);
+
+    let tasks = [];
+    let takeoffMarker = null;
+    let landingMarker = null;
+    let currentPolygon = null;
+    let drawnItems = []; // 用于存储所有绘制的地图元素
+    let flightPath = null; // 存储当前显示的飞行路径
+
+    // 清除地图上的标记和区域
+    function clearMap() {
+        drawnItems.forEach(item => map.removeLayer(item));
+        drawnItems = [];
+        if (flightPath) {
+            map.removeLayer(flightPath);
+            flightPath = null;
+        }
+    }
+
+    // 清空输入框内容
+    function resetInputs() {
+        document.getElementById('task-name').value = '';
+        document.getElementById('start-time').value = '';
+        document.getElementById('takeoff-coord').value = '';
+        document.getElementById('landing-coord').value = '';
+    }
+
+    // 创建新任务
+    function createNewTask() {
+        document.getElementById('task-form').style.display = 'block'; // 显示表单
+        resetInputs(); // 清空输入框
+        clearMap(); // 清除地图上的标记和区域
+    }
+
+    // 选择起飞地点
+    function selectTakeoffLocation() {
+        alert('请在地图上点击选择起飞地点');
+        map.once('click', (e) => {
+            const coord = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
+            document.getElementById('takeoff-coord').value = coord;
+
+            if (takeoffMarker) map.removeLayer(takeoffMarker);
+            takeoffMarker = L.marker([e.latlng.lat, e.latlng.lng], { title: '起飞地点' }).addTo(map);
+            drawnItems.push(takeoffMarker);
+        });
+    }
+
+    // 更新起飞点标记（当手动输入坐标时）
+    function updateTakeoffMarker() {
+        const coords = document.getElementById('takeoff-coord').value.split(',').map(Number);
+        if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+            if (takeoffMarker) map.removeLayer(takeoffMarker);
+            takeoffMarker = L.marker(coords, { title: '起飞地点' }).addTo(map);
+            drawnItems.push(takeoffMarker);
+        }
+    }
+
+    // 选择降落地点
+    function selectLandingLocation() {
+        alert('请在地图上点击选择降落地点');
+        map.once('click', (e) => {
+            const coord = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
+            document.getElementById('landing-coord').value = coord;
+
+            if (landingMarker) map.removeLayer(landingMarker);
+            landingMarker = L.marker([e.latlng.lat, e.latlng.lng], { title: '降落地点' }).addTo(map);
+            drawnItems.push(landingMarker);
+        });
+    }
+
+    // 更新降落点标记（当手动输入坐标时）
+    function updateLandingMarker() {
+        const coords = document.getElementById('landing-coord').value.split(',').map(Number);
+        if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+            if (landingMarker) map.removeLayer(landingMarker);
+            landingMarker = L.marker(coords, { title: '降落地点' }).addTo(map);
+            drawnItems.push(landingMarker);
+        }
+    }
+
+    // 绘制扫描区域
+    function startDrawing() {
+        currentPolygon = null;
+        alert('请在地图上绘制区域，右键完成绘制');
+        map.on('click', addPolygonPoint);
+        map.once('contextmenu', finishPolygon);
+    }
+
+    function addPolygonPoint(e) {
+        if (!currentPolygon) {
+            currentPolygon = L.polygon([[e.latlng.lat, e.latlng.lng]], { color: 'blue' }).addTo(map);
+            drawnItems.push(currentPolygon);
+        } else {
+            currentPolygon.addLatLng(e.latlng);
+        }
+    }
+
+    function finishPolygon() {
+        map.off('click', addPolygonPoint);
+        alert('区域绘制完成！');
+    }
+
+    // 判断点是否在多边形内
+    function isPointInPolygon(point, polygon) {
+        // Ray casting algorithm
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            const xi = polygon[i].lat, yi = polygon[i].lng;
+            const xj = polygon[j].lat, yj = polygon[j].lng;
+            
+            const intersect = ((yi > point[1]) !== (yj > point[1]))
+                && (point[0] < (xj - xi) * (point[1] - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    }
+
+    // 计算线段与多边形边的交点
+    function findIntersections(line, polygon) {
+        const intersections = [];
+        
+        // 循环多边形的每条边
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            const segmentA = [polygon[j].lat, polygon[j].lng];
+            const segmentB = [polygon[i].lat, polygon[i].lng];
+            
+            // 线段相交检测
+            const intersection = lineIntersection(
+                [line[0][0], line[0][1]], 
+                [line[1][0], line[1][1]],
+                segmentA, 
+                segmentB
+            );
+            
+            if (intersection) {
+                intersections.push(intersection);
+            }
+        }
+        
+        return intersections.sort((a, b) => {
+            // 水平线，按X坐标排序
+            if (Math.abs(line[0][0] - line[1][0]) < 0.0000001) {
+                return a[1] - b[1];
+            }
+            // 垂直线，按Y坐标排序
+            return a[0] - b[0];
+        });
+    }
+
+    // 线段相交检测
+    function lineIntersection(p1, p2, p3, p4) {
+        // 线段1: p1->p2
+        // 线段2: p3->p4
+        
+        const x1 = p1[0], y1 = p1[1];
+        const x2 = p2[0], y2 = p2[1];
+        const x3 = p3[0], y3 = p3[1];
+        const x4 = p4[0], y4 = p4[1];
+        
+        const denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
+        
+        // 如果分母为0，表示线段平行
+        if (denom === 0) return null;
+        
+        const ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom;
+        const ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom;
+        
+        // 如果ua和ub都在[0,1]范围内，表示线段相交
+        if (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1) {
+            return [
+                x1 + ua * (x2 - x1),
+                y1 + ua * (y2 - y1)
+            ];
+        }
+        
+        return null;
+    }
+
+    // 计算距离（两个坐标点间）
+    function calculateDistance(point1, point2) {
+        // 使用Haversine公式计算距离（单位：千米）
+        const R = 6371; // 地球半径（千米）
+        const dLat = (point2[0] - point1[0]) * Math.PI / 180;
+        const dLon = (point2[1] - point1[1]) * Math.PI / 180;
+        const a = 
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(point1[0] * Math.PI / 180) * Math.cos(point2[0] * Math.PI / 180) * 
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+    }
+
+    // 计算总路径长度
+    function calculatePathLength(path) {
+        let totalLength = 0;
+        for (let i = 1; i < path.length; i++) {
+            totalLength += calculateDistance(path[i-1], path[i]);
+        }
+        return totalLength;
+    }
+
+    // 生成飞行路径（自适应多边形）
+    function generateFlightPath() {
+        if (!currentPolygon || !takeoffMarker || !landingMarker) return null;
+        
+        const polygonCoords = currentPolygon.getLatLngs()[0];
+        const takeoffPoint = [takeoffMarker.getLatLng().lat, takeoffMarker.getLatLng().lng];
+        const landingPoint = [landingMarker.getLatLng().lat, landingMarker.getLatLng().lng];
+        const scanSpacing = parseFloat(document.getElementById('scan-spacing').value) / 1000; // 转为千米
+        
+        // 计算多边形的边界框
+        let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+        
+        polygonCoords.forEach(point => {
+            minLat = Math.min(minLat, point.lat);
+            maxLat = Math.max(maxLat, point.lat);
+            minLng = Math.min(minLng, point.lng);
+            maxLng = Math.max(maxLng, point.lng);
+        });
+        
+        // 根据多边形形状选择扫描方向
+        const latSpan = maxLat - minLat;
+        const lngSpan = maxLng - minLng;
+        
+        // 选择较短的边进行扫描，以减少转弯次数
+        const scanHorizontally = latSpan > lngSpan;
+        
+        // 创建一个适应多边形形状的路径
+        const pathSegments = [];
+        
+        if (scanHorizontally) {
+            // 水平扫描（沿纬度方向）
+            // 转换扫描间距为大约的纬度差
+            const latStep = scanSpacing / 111;
+            
+            let currentLat = minLat;
+            let direction = 1; // 1为从西到东，-1为从东到西
+            
+            while (currentLat <= maxLat) {
+                // 创建水平线
+                const line = [
+                    [currentLat, minLng - 0.01], // 延伸线段确保与多边形边界相交
+                    [currentLat, maxLng + 0.01]
+                ];
+                
+                // 计算水平线与多边形的交点
+                const intersections = findIntersections(line, polygonCoords);
+                
+                // 如果有偶数个交点，表示线段在多边形内部有部分
+                if (intersections.length >= 2 && intersections.length % 2 === 0) {
+                    // 按对儿添加交点，形成路径段
+                    for (let i = 0; i < intersections.length; i += 2) {
+                        const segment = direction === 1 ? 
+                            [[intersections[i][0], intersections[i][1]], [intersections[i+1][0], intersections[i+1][1]]] : 
+                            [[intersections[i+1][0], intersections[i+1][1]], [intersections[i][0], intersections[i][1]]];
+                        
+                        pathSegments.push(segment);
+                    }
+                }
+                
+                currentLat += latStep;
+                direction *= -1; // 改变方向
+            }
+        } else {
+            // 垂直扫描（沿经度方向）
+            // 转换扫描间距为大约的经度差（考虑纬度的影响）
+            const lngStep = scanSpacing / (111 * Math.cos(minLat * Math.PI / 180));
+            
+            let currentLng = minLng;
+            let direction = 1; // 1为从南到北，-1为从北到南
+            
+            while (currentLng <= maxLng) {
+                // 创建垂直线
+                const line = [
+                    [minLat - 0.01, currentLng], // 延伸线段确保与多边形边界相交
+                    [maxLat + 0.01, currentLng]
+                ];
+                
+                // 计算垂直线与多边形的交点
+                const intersections = findIntersections(line, polygonCoords);
+                
+                // 如果有偶数个交点，表示线段在多边形内部有部分
+                if (intersections.length >= 2 && intersections.length % 2 === 0) {
+                    // 按对儿添加交点，形成路径段
+                    for (let i = 0; i < intersections.length; i += 2) {
+                        const segment = direction === 1 ? 
+                            [[intersections[i][0], intersections[i][1]], [intersections[i+1][0], intersections[i+1][1]]] : 
+                            [[intersections[i+1][0], intersections[i+1][1]], [intersections[i][0], intersections[i][1]]];
+                        
+                        pathSegments.push(segment);
+                    }
+                }
+                
+                currentLng += lngStep;
+                direction *= -1; // 改变方向
+            }
+        }
+        
+        // 构建完整的飞行路径
+        // 先添加起飞点
+        const completePath = [takeoffPoint];
+        
+        // 添加所有路径段，确保连续
+        if (pathSegments.length > 0) {
+            // 添加第一个路径段的起点
+            completePath.push([pathSegments[0][0][0], pathSegments[0][0][1]]);
+            
+            // 依次添加每个路径段的终点
+            for (let i = 0; i < pathSegments.length; i++) {
+                completePath.push([pathSegments[i][1][0], pathSegments[i][1][1]]);
+                
+                // 如果有下一个路径段，添加连接线
+                if (i < pathSegments.length - 1) {
+                    completePath.push([pathSegments[i+1][0][0], pathSegments[i+1][0][1]]);
+                }
+            }
+        }
+        
+        // 最后添加降落点
+        completePath.push(landingPoint);
+        
+        return completePath;
+    }
+
+    // 创建任务
+    function createTask() {
+        const name = document.getElementById('task-name').value;
+        const time = document.getElementById('start-time').value;
+        const takeoffCoord = document.getElementById('takeoff-coord').value.split(',').map(Number);
+        const landingCoord = document.getElementById('landing-coord').value.split(',').map(Number);
+
+        if (!name || !time || !takeoffCoord || !landingCoord || !currentPolygon) {
+            alert('请填写完整任务信息并绘制区域！');
+            return;
+        }
+
+        const area = calculateArea(currentPolygon.getLatLngs()[0]);
+        const estimatedTime = Math.round(area * 0.5);
+        
+        // 生成飞行路径
+        const flightPathCoords = generateFlightPath();
+        const pathLength = flightPathCoords ? calculatePathLength(flightPathCoords) : 0;
+
+        tasks.push({
+            name,
+            time,
+            takeoff: takeoffCoord,
+            landing: landingCoord,
+            area,
+            estimatedTime,
+            polygon: currentPolygon.toGeoJSON(),
+            path: flightPathCoords,
+            pathLength
+        });
+
+        updateTaskList();
+        clearMap(); // 清除地图上的内容
+        resetInputs(); // 清空输入框内容
+        document.getElementById('task-form').style.display = 'none'; // 隐藏表单
+        alert('任务已保存！');
+    }
+
+    // 更新任务列表
+    function updateTaskList() {
+        const taskList = document.getElementById('task-list');
+        taskList.innerHTML = '';
+        tasks.forEach((task, index) => {
+            const taskItem = document.createElement('div');
+            taskItem.textContent = `${task.name} - ${task.time}`;
+            taskItem.onclick = () => displayTaskDetails(index);
+            taskList.appendChild(taskItem);
+        });
+    }
+
+    // 显示任务详情
+    function displayTaskDetails(index) {
+        const task = tasks[index];
+        clearMap(); // 清除地图上的标记和区域
+
+        // 显示起飞点
+        takeoffMarker = L.marker(task.takeoff, { title: '起飞地点' }).addTo(map);
+        drawnItems.push(takeoffMarker);
+
+        // 显示降落点
+        landingMarker = L.marker(task.landing, { title: '降落地点' }).addTo(map);
+        drawnItems.push(landingMarker);
+
+        // 显示扫描区域
+        currentPolygon = L.geoJSON(task.polygon, { style: { color: 'blue' } }).addTo(map);
+        drawnItems.push(currentPolygon);
+        
+        // 显示飞行路径
+        if (task.path && task.path.length > 0) {
+            flightPath = L.polyline(task.path, { 
+                color: 'red', 
+                weight: 3, 
+                opacity: 0.8,
+                dashArray: '10, 5',
+                className: 'leaflet-polyline' // 应用动画效果的类名
+            }).addTo(map);
+        }
+
+        // 更新实时显示信息
+        document.getElementById('current-task').textContent = task.name;
+        document.getElementById('current-takeoff').textContent = `(${task.takeoff.join(', ')})`;
+        document.getElementById('current-landing').textContent = `(${task.landing.join(', ')})`;
+        document.getElementById('current-area').textContent = task.area.toFixed(2);
+        document.getElementById('current-duration').textContent = task.estimatedTime;
+        document.getElementById('path-length').textContent = task.pathLength ? task.pathLength.toFixed(2) : 'N/A';
+        
+        // 调整地图视图以适应路径和区域
+        const bounds = currentPolygon.getBounds();
+        if (task.path && task.path.length > 0) {
+            task.path.forEach(point => {
+                bounds.extend(point);
+            });
+        }
+        map.fitBounds(bounds.pad(0.1));
+    }
+
+    // 计算区域面积
+    function calculateArea(coords) {
+        let area = 0;
+        for (let i = 0; i < coords.length; i++) {
+            const j = (i + 1) % coords.length;
+            area += coords[i].lat * coords[j].lng - coords[j].lat * coords[i].lng;
+        }
+        return Math.abs(area / 2) * 111 * 111; // 转换为公顷
+    }
+</script>
+</body>
+</html>

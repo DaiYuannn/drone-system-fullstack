@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>无人机任务管理系统</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            display: flex;
+            height: 100vh;
+        }
+        #sidebar {
+            width: 350px;
+            background: #f8f9fa;
+            padding: 20px;
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+            overflow-y: auto;
+        }
+        h2, h3 {
+            margin-bottom: 10px;
+        }
+        label {
+            display: inline-block;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        input[type="text"], input[type="datetime-local"] {
+            width: calc(100% - 100px);
+            padding: 5px;
+            margin-top: 5px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 5px 0;
+            background: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        #map {
+            flex: 1;
+            height: 100%;
+        }
+        .task-list {
+            border: 1px solid #ddd;
+            padding: 10px;
+            max-height: 180px;
+            overflow-y: auto;
+            border-radius: 5px;
+            background: #fff;
+        }
+        .task-list div {
+            margin-bottom: 10px;
+            padding: 5px;
+            cursor: pointer;
+            background: #f9f9f9;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        .task-list div:hover {
+            background: #e9ecef;
+        }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <h2>任务管理</h2>
+    <button onclick="createNewTask()">创建任务</button>
+    <div id="task-form" style="display: none;">
+        <label for="task-name">任务名称：</label>
+        <input type="text" id="task-name" placeholder="输入任务名称" />
+        <label for="start-time">开始时间：</label>
+        <input type="datetime-local" id="start-time" />
+
+        <label for="takeoff-coord">起飞地点：</label>
+        <input type="text" id="takeoff-coord" placeholder="格式：30.5, 114.3" oninput="updateTakeoffMarker()" />
+        <button onclick="selectTakeoffLocation()">选择</button>
+
+        <label for="landing-coord">降落地点：</label>
+        <input type="text" id="landing-coord" placeholder="格式：30.6, 114.3" oninput="updateLandingMarker()" />
+        <button onclick="selectLandingLocation()">选择</button>
+
+        <button onclick="startDrawing()">绘制区域</button>
+        <button onclick="createTask()">保存任务</button>
+    </div>
+
+    <h3>任务列表</h3>
+    <div class="task-list" id="task-list"></div>
+
+    <h2>实时显示</h2>
+    <div>当前任务：<span id="current-task">无</span></div>
+    <div>起飞地点：<span id="current-takeoff">N/A</span></div>
+    <div>降落地点：<span id="current-landing">N/A</span></div>
+    <div>扫描区域面积：<span id="current-area">N/A</span> 公顷</div>
+    <div>预计用时：<span id="current-duration">N/A</span> 分钟</div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // 初始化地图
+    const map = L.map('map').setView([30.5, 114.3], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+    }).addTo(map);
+
+    let tasks = [];
+    let takeoffMarker = null;
+    let landingMarker = null;
+    let currentPolygon = null;
+    let drawnItems = []; // 用于存储所有绘制的地图元素
+
+    // 清除地图上的标记和区域
+    function clearMap() {
+        drawnItems.forEach(item => map.removeLayer(item));
+        drawnItems = [];
+    }
+
+    // 清空输入框内容
+    function resetInputs() {
+        document.getElementById('task-name').value = '';
+        document.getElementById('start-time').value = '';
+        document.getElementById('takeoff-coord').value = '';
+        document.getElementById('landing-coord').value = '';
+    }
+
+    // 创建新任务
+    function createNewTask() {
+        document.getElementById('task-form').style.display = 'block'; // 显示表单
+        resetInputs(); // 清空输入框
+        clearMap(); // 清除地图上的标记和区域
+    }
+
+    // 选择起飞地点
+    function selectTakeoffLocation() {
+        alert('请在地图上点击选择起飞地点');
+        map.once('click', (e) => {
+            const coord = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
+            document.getElementById('takeoff-coord').value = coord;
+
+            if (takeoffMarker) map.removeLayer(takeoffMarker);
+            takeoffMarker = L.marker([e.latlng.lat, e.latlng.lng], { title: '起飞地点' }).addTo(map);
+            drawnItems.push(takeoffMarker);
+        });
+    }
+
+    // 选择降落地点
+    function selectLandingLocation() {
+        alert('请在地图上点击选择降落地点');
+        map.once('click', (e) => {
+            const coord = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
+            document.getElementById('landing-coord').value = coord;
+
+            if (landingMarker) map.removeLayer(landingMarker);
+            landingMarker = L.marker([e.latlng.lat, e.latlng.lng], { title: '降落地点' }).addTo(map);
+            drawnItems.push(landingMarker);
+        });
+    }
+
+    // 绘制扫描区域
+    function startDrawing() {
+        currentPolygon = null;
+        alert('请在地图上绘制区域，右键完成绘制');
+        map.on('click', addPolygonPoint);
+        map.once('contextmenu', finishPolygon);
+    }
+
+    function addPolygonPoint(e) {
+        if (!currentPolygon) {
+            currentPolygon = L.polygon([[e.latlng.lat, e.latlng.lng]], { color: 'blue' }).addTo(map);
+            drawnItems.push(currentPolygon);
+        } else {
+            currentPolygon.addLatLng(e.latlng);
+        }
+    }
+
+    function finishPolygon() {
+        map.off('click', addPolygonPoint);
+        alert('区域绘制完成！');
+    }
+
+    // 创建任务
+    function createTask() {
+        const name = document.getElementById('task-name').value;
+        const time = document.getElementById('start-time').value;
+        const takeoffCoord = document.getElementById('takeoff-coord').value.split(',').map(Number);
+        const landingCoord = document.getElementById('landing-coord').value.split(',').map(Number);
+
+        if (!name || !time || !takeoffCoord || !landingCoord || !currentPolygon) {
+            alert('请填写完整任务信息并绘制区域！');
+            return;
+        }
+
+        const area = calculateArea(currentPolygon.getLatLngs()[0]);
+        const estimatedTime = Math.round(area * 0.5);
+
+        tasks.push({
+            name,
+            time,
+            takeoff: takeoffCoord,
+            landing: landingCoord,
+            area,
+            estimatedTime,
+            polygon: currentPolygon.toGeoJSON(),
+        });
+
+        updateTaskList();
+        clearMap(); // 清除地图上的内容
+        resetInputs(); // 清空输入框内容
+        document.getElementById('task-form').style.display = 'none'; // 隐藏表单
+        alert('任务已保存！');
+    }
+
+    // 更新任务列表
+    function updateTaskList() {
+        const taskList = document.getElementById('task-list');
+        taskList.innerHTML = '';
+        tasks.forEach((task, index) => {
+            const taskItem = document.createElement('div');
+            taskItem.textContent = `${task.name} - ${task.time}`;
+            taskItem.onclick = () => displayTaskDetails(index);
+            taskList.appendChild(taskItem);
+        });
+    }
+
+    // 显示任务详情
+    function displayTaskDetails(index) {
+        const task = tasks[index];
+        clearMap(); // 清除地图上的标记和区域
+
+        // 显示起飞点
+        takeoffMarker = L.marker(task.takeoff, { title: '起飞地点' }).addTo(map);
+        drawnItems.push(takeoffMarker);
+
+        // 显示降落点
+        landingMarker = L.marker(task.landing, { title: '降落地点' }).addTo(map);
+        drawnItems.push(landingMarker);
+
+        // 显示扫描区域
+        currentPolygon = L.geoJSON(task.polygon, { style: { color: 'blue' } }).addTo(map);
+        drawnItems.push(currentPolygon);
+
+        // 更新实时显示
+        document.getElementById('current-task').textContent = task.name;
+        document.getElementById('current-takeoff').textContent = `(${task.takeoff.join(', ')})`;
+        document.getElementById('current-landing').textContent = `(${task.landing.join(', ')})`;
+        document.getElementById('current-area').textContent = task.area.toFixed(2);
+        document.getElementById('current-duration').textContent = task.estimatedTime;
+    }
+
+    // 计算区域面积
+    function calculateArea(coords) {
+        let area = 0;
+        for (let i = 0; i < coords.length; i++) {
+            const j = (i + 1) % coords.length;
+            area += coords[i].lat * coords[j].lng - coords[j].lat * coords[i].lng;
+        }
+        return Math.abs(area / 2) * 111 * 111; // 转换为公顷
+    }
+</script>
+
+</body>
+</html>

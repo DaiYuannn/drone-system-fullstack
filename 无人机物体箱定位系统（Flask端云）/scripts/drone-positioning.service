@@ -1,0 +1,45 @@
+[Unit]
+Description=无人机物体箱定位系统
+Documentation=https://github.com/your-org/drone-positioning
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=drone
+Group=drone
+WorkingDirectory=/opt/drone_positioning
+Environment=PATH=/opt/drone_positioning/venv/bin
+Environment=PYTHONPATH=/opt/drone_positioning
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/drone_positioning/env
+ExecStart=/opt/drone_positioning/venv/bin/python /opt/drone_positioning/app.py
+ExecReload=/bin/kill -HUP $MAINPID
+ExecStop=/bin/kill -TERM $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=drone-positioning
+
+# 安全设置
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/drone_positioning /var/log/drone_positioning /opt/drone_positioning/logs /opt/drone_positioning/uploads
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# 进程管理
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  emqx:
+    image: emqx:5
+    restart: unless-stopped
+    ports:
+      - "1883:1883"   # MQTT
+      - "8083:8083"   # MQTT over WebSocket
+      - "18083:18083" # Dashboard
+
+  backend:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ../backend:/app
+    command: bash -lc "pip install -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - emqx
